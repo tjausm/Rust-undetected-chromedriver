@@ -155,10 +155,10 @@ async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std:
                 "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "linux64", "chromedriver-linux64.zip"
             ),
-            ("macos", "aarch64") => format!(
-                "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
-                version, "mac-arm64", "chromedriver-mac-arm64.zip"
-            ),
+            // ("macos", "aarch64") => format!(
+            //     "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
+            //     version, "mac-arm64", "chromedriver-mac-arm64.zip"
+            // ),
             ("macos", _) => format!(
                 "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "mac-x64", "chromedriver-mac-x64.zip"
