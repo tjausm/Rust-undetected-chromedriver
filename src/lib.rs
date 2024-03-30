@@ -1,11 +1,11 @@
 use rand::Rng;
+use std::error::Error;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
-use thirtyfour::{DesiredCapabilities, WebDriver};
-use std::error::Error;
 use std::time::Duration;
 use thirtyfour::{prelude::ElementWaitable, By};
+use thirtyfour::{DesiredCapabilities, WebDriver};
 
 /// Fetches a new ChromeDriver executable and patches it to prevent detection.
 /// Returns a WebDriver instance.
@@ -129,7 +129,7 @@ pub async fn chrome() -> Result<WebDriver, Box<dyn std::error::Error>> {
 
 async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std::error::Error>> {
     let os = std::env::consts::OS;
-
+    let arch = std::env::consts::ARCH;
     let installed_version = get_chrome_version(os).await?;
     let chromedriver_url: String;
     if installed_version.as_str() >= "114" {
@@ -141,19 +141,22 @@ async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std:
         let version = json["milestones"][installed_version]["version"]
             .as_str()
             .unwrap();
-
         // Fetch the chromedriver binary
-        chromedriver_url = match os {
-            "linux" => format!(
-                "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/{}/{}/{}",
+        chromedriver_url = match (os, arch) {
+            ("linux", _) => format!(
+                "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "linux64", "chromedriver-linux64.zip"
             ),
-            "macos" => format!(
-                "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/{}/{}/{}",
+            ("macos", _) => format!(
+                "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "mac-x64", "chromedriver-mac-x64.zip"
             ),
-            "windows" => format!(
-                "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/{}/{}/{}",
+            ("macos", "aarch64") => format!(
+                "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
+                version, "mac-arm64", "chromedriver-mac-arm64.zip"
+            ),
+            ("windows", _) => format!(
+                "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "win64", "chromedriver-win64.zip"
             ),
             _ => panic!("Unsupported OS!"),
@@ -167,16 +170,19 @@ async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std:
             .send()
             .await?;
         let body = resp.text().await?;
-        chromedriver_url = match os {
-            "linux" => format!(
+        chromedriver_url = match (os, arch) {
+            ("linux", _) => format!(
                 "https://chromedriver.storage.googleapis.com/{}/chromedriver_linux64.zip",
                 body
             ),
-            "windows" => format!(
+            ("windows", _) => format!(
                 "https://chromedriver.storage.googleapis.com/{}/chromedriver_win32.zip",
                 body
             ),
-            "macos" => format!(
+            ("macos", "aarch64") => {
+                panic!("MacOS on Apple Silicon with < Chrome 114 not supported!")
+            }
+            ("macos", _) => format!(
                 "https://chromedriver.storage.googleapis.com/{}/chromedriver_mac64.zip",
                 body
             ),
@@ -218,12 +224,12 @@ async fn get_chrome_version(os: &str) -> Result<String, Box<dyn std::error::Erro
         _ => panic!("Unsupported OS!"),
     };
     let output = String::from_utf8(command.stdout)?;
-    
+
     let version = output
-    .lines()
-    .flat_map(|line| line.chars().filter(|&ch| ch.is_ascii_digit()))
-    .take(3)
-    .collect::<String>();
+        .lines()
+        .flat_map(|line| line.chars().filter(|&ch| ch.is_ascii_digit()))
+        .take(3)
+        .collect::<String>();
 
     println!("Currently installed Chrome version: {}", version);
     Ok(version)
@@ -232,10 +238,7 @@ async fn get_chrome_version(os: &str) -> Result<String, Box<dyn std::error::Erro
 #[async_trait::async_trait]
 pub trait Chrome {
     async fn new() -> Self;
-    async fn bypass_cloudflare(
-        &self,
-        url: &str,
-    ) -> Result<(), Box<dyn Error>>;
+    async fn bypass_cloudflare(&self, url: &str) -> Result<(), Box<dyn Error>>;
     async fn borrow(&self) -> &WebDriver;
     async fn goto(&self, url: &str) -> Result<(), Box<dyn Error>>;
 }
@@ -249,20 +252,17 @@ impl Chrome for WebDriver {
     async fn goto(&self, url: &str) -> Result<(), Box<dyn Error>> {
         let driver = self.borrow().await;
         driver
-            .execute(
-                &format!(r#"window.open("{}", "_blank");"#, url),
-                vec![],
-            )
+            .execute(&format!(r#"window.open("{}", "_blank");"#, url), vec![])
             .await?;
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         let first_window = driver
-        .windows()
-        .await?
-        .first()
-        .expect("Unable to get first windows")
-        .clone();
+            .windows()
+            .await?
+            .first()
+            .expect("Unable to get first windows")
+            .clone();
 
         driver.switch_to_window(first_window).await?;
         driver.close_window().await?;
@@ -276,27 +276,23 @@ impl Chrome for WebDriver {
         Ok(())
     }
 
-async fn bypass_cloudflare(
-    &self,
-    url: &str,
-) -> Result<(), Box<dyn Error>> {
-    let driver = self.borrow().await;
-    driver.goto(url).await?;
+    async fn bypass_cloudflare(&self, url: &str) -> Result<(), Box<dyn Error>> {
+        let driver = self.borrow().await;
+        driver.goto(url).await?;
 
-    driver.enter_frame(0).await?;
+        driver.enter_frame(0).await?;
 
-    let button = driver.find(By::Css("#challenge-stage")).await?;
+        let button = driver.find(By::Css("#challenge-stage")).await?;
 
-    button.wait_until().clickable().await?;
+        button.wait_until().clickable().await?;
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
-    button.click().await?;
-    Ok(())
-}
+        button.click().await?;
+        Ok(())
+    }
 
-async fn borrow(&self) -> &WebDriver {
-    self
-}
-
+    async fn borrow(&self) -> &WebDriver {
+        self
+    }
 }
