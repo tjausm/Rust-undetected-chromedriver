@@ -27,7 +27,7 @@ pub async fn chrome_caps(
     } else {
         println!("ChromeDriver does not exist! Fetching...");
         let client = reqwest::Client::new();
-        fetch_chromedriver(&client).await.unwrap();
+        fetch_chromedriver(&client).await?;
     }
     let chromedriver_executable = match os {
         "linux" => "chromedriver_PATCHED",
@@ -43,7 +43,7 @@ pub async fn chrome_caps(
             } else {
                 "chromedriver"
             };
-            let f = std::fs::read(file_name).unwrap();
+            let f = std::fs::read(file_name)?;
             let mut new_chromedriver_bytes = f.clone();
             let mut total_cdc = String::from("");
             let mut cdc_pos_list = Vec::new();
@@ -87,7 +87,7 @@ pub async fn chrome_caps(
             println!("Patched {} cdcs!", patch_ct);
 
             println!("Starting to write to binary file...");
-            let _file = std::fs::File::create(chromedriver_executable).unwrap();
+            let _file = std::fs::File::create(chromedriver_executable)?;
             match std::fs::write(chromedriver_executable, new_chromedriver_bytes) {
                 Ok(_res) => {
                     println!("Successfully wrote patched executable to 'chromedriver_PATCHED'!",)
@@ -101,11 +101,9 @@ pub async fn chrome_caps(
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        let mut perms = std::fs::metadata(chromedriver_executable)
-            .unwrap()
-            .permissions();
+        let mut perms = std::fs::metadata(chromedriver_executable)?.permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(chromedriver_executable, perms).unwrap();
+        std::fs::set_permissions(chromedriver_executable, perms)?;
     }
     println!("Starting chromedriver...");
     let port: usize = rand::thread_rng().gen_range(2000..5000);
@@ -113,15 +111,13 @@ pub async fn chrome_caps(
         .arg(format!("--port={}", port))
         .spawn()
         .expect("Failed to start chromedriver!");
-    caps.set_no_sandbox().unwrap();
-    caps.set_disable_dev_shm_usage().unwrap();
-    caps.add_chrome_arg("--disable-blink-features=AutomationControlled")
-        .unwrap();
-    caps.add_chrome_arg("window-size=1920,1080").unwrap();
-    caps.add_chrome_arg("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36").unwrap();
-    caps.add_chrome_arg("disable-infobars").unwrap();
-    caps.add_chrome_option("excludeSwitches", ["enable-automation"])
-        .unwrap();
+    caps.set_no_sandbox()?;
+    caps.set_disable_dev_shm_usage()?;
+    caps.add_chrome_arg("--disable-blink-features=AutomationControlled")?;
+    caps.add_chrome_arg("window-size=1920,1080")?;
+    caps.add_chrome_arg("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36")?;
+    caps.add_chrome_arg("disable-infobars")?;
+    caps.add_chrome_option("excludeSwitches", ["enable-automation"])?;
     let mut driver = None;
     let mut attempt = 0;
     while driver.is_none() && attempt < 20 {
@@ -131,7 +127,7 @@ pub async fn chrome_caps(
             Err(_) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
         }
     }
-    let driver = driver.unwrap();
+    let driver = driver.ok_or("Couldn't connect to chromedriver")?;
     Ok(driver)
 }
 
@@ -148,17 +144,13 @@ async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std:
         let json = serde_json::from_slice::<serde_json::Value>(&body)?;
         let version = json["milestones"][installed_version]["version"]
             .as_str()
-            .unwrap();
+            .ok_or("Couldn't find chromedriver version")?;
         // Fetch the chromedriver binary
         chromedriver_url = match (os, arch) {
             ("linux", _) => format!(
                 "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "linux64", "chromedriver-linux64.zip"
             ),
-            // ("macos", "aarch64") => format!(
-            //     "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
-            //     version, "mac-arm64", "chromedriver-mac-arm64.zip"
-            // ),
             ("macos", _) => format!(
                 "https://storage.googleapis.com/chrome-for-testing-public/{}/{}/{}",
                 version, "mac-x64", "chromedriver-mac-x64.zip"
@@ -208,7 +200,9 @@ async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std:
         if file.name().ends_with('/') {
             std::fs::create_dir_all(&outpath)?;
         } else {
-            let outpath_relative = outpath.file_name().unwrap();
+            let outpath_relative = outpath
+                .file_name()
+                .ok_or("Couldnt compute outpath_relative")?;
             let mut outfile = std::fs::File::create(outpath_relative)?;
             std::io::copy(&mut file, &mut outfile)?;
         }
