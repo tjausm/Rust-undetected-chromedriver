@@ -2,14 +2,14 @@ use rand::Rng;
 use std::error::Error;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use thirtyfour::{prelude::ElementWaitable, By};
 use thirtyfour::{ChromeCapabilities, DesiredCapabilities, WebDriver};
 
 /// Fetches a new ChromeDriver executable and patches it to prevent detection.
 /// Returns a WebDriver instance, constructed with default capabilities.
-pub async fn chrome() -> Result<WebDriver, Box<dyn std::error::Error>> {
+pub async fn chrome() -> Result<(Child, WebDriver), Box<dyn std::error::Error>> {
     let caps = DesiredCapabilities::chrome();
     chrome_caps(caps).await
 }
@@ -18,7 +18,7 @@ pub async fn chrome() -> Result<WebDriver, Box<dyn std::error::Error>> {
 /// Returns a WebDriver instance.
 pub async fn chrome_caps(
     mut caps: ChromeCapabilities,
-) -> Result<WebDriver, Box<dyn std::error::Error>> {
+) -> Result<(Child, WebDriver), Box<dyn std::error::Error>> {
     let os = std::env::consts::OS;
     if std::path::Path::new("chromedriver").exists()
         || std::path::Path::new("chromedriver.exe").exists()
@@ -107,8 +107,10 @@ pub async fn chrome_caps(
     }
     println!("Starting chromedriver...");
     let port: usize = rand::thread_rng().gen_range(2000..5000);
-    Command::new(format!("./{}", chromedriver_executable))
+    let chromedriver_process = Command::new(format!("./{}", chromedriver_executable))
         .arg(format!("--port={}", port))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .expect("Failed to start chromedriver!");
     caps.set_no_sandbox()?;
@@ -128,7 +130,8 @@ pub async fn chrome_caps(
         }
     }
     let driver = driver.ok_or("Couldn't connect to chromedriver")?;
-    Ok(driver)
+    println!("Chromedriver started");
+    Ok((chromedriver_process, driver))
 }
 
 async fn fetch_chromedriver(client: &reqwest::Client) -> Result<(), Box<dyn std::error::Error>> {
@@ -248,7 +251,7 @@ pub trait Chrome {
 #[async_trait::async_trait]
 impl Chrome for WebDriver {
     async fn new() -> WebDriver {
-        chrome().await.unwrap()
+        chrome().await.unwrap().1
     }
 
     async fn goto(&self, url: &str) -> Result<(), Box<dyn Error>> {

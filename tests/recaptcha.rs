@@ -38,7 +38,7 @@ mod tests {
 
     #[tokio::test]
     async fn recaptcha() {
-        let driver = chrome().await.unwrap();
+        let driver = chrome().await.unwrap().1;
         let score = get_score(&driver).await;
         assert!(score.unwrap_or(0.0) >= 0.7);
         driver.quit().await.unwrap();
